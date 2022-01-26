@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define PROGRAM_SIZE = 1000
 
 struct strip_element {
     int value;
@@ -50,14 +51,14 @@ void stepBackward() {
 
 //Skips amount steps forward in the Turing strip
 void skipForward(int amount) {
-    for (int i = 0; i < amount; i++) {
+    for (int i = 1; i < amount; i++) {
         stepForward();
     }
 }
 
 //Skips amount steps backward in the Turing strip
 void skipBackward(int amount) {
-    for (int i = 0; i < amount; i++) {
+    for (int i = 1; i < amount; i++) {
         stepBackward();
     }
 }
@@ -92,13 +93,46 @@ int pop() {
     return out;
 }
 
+FILE *program;
+
+int getchr() {
+    return fgetc(program);
+}
+
+int putchr() {
+    return fseek(program, -1, SEEK_CUR);    
+}
+
+int jump(int pos) {
+    return fseek(program, pos, SEEK_SET);
+}
+
+void cleanup() {
+    fclose(program);
+    program = NULL;
+}
+
+
+
+
+
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        printf("Usage : crash program_string\n");
+        printf("Usage : crash program_file\n");
         return -1;
     }
    
-    char *program = argv[1]; 
+    char *program_file= argv[1];
+    if (program_file == NULL) {
+        return -1;
+    }
+
+    program = fopen(program_file, "r");
+    if (!program) {
+        return -1;
+    }
+     
     //Initialize stack and strip
     strip = malloc(sizeof(entry));
     strip->next = NULL;
@@ -108,13 +142,9 @@ int main(int argc, char *argv[]) {
     stack = malloc(sizeof(stack_entry));
     stack->next = NULL;
     stack->value = 0;
-
-    int program_head = 0;
+    char c;
     for (;;) {
-        if (program_head < 0) {
-            program_head = 0;
-        }
-        switch (program[program_head]) {
+        switch (getchr()) {
             //CORE OPERATIONS
             case '1':
             case '2':
@@ -129,13 +159,21 @@ int main(int argc, char *argv[]) {
                 //Read value, push to stack
                 ;
                 int converted = 0;
-                while ((program[program_head] >= 48)
-                    && (program[program_head] <= 57)) {
-                    converted = (converted * 10) + (program[program_head] - 48);
-                    program_head++;
-                }
-                program_head--;
+                putchr();
+                while (((c = (char) getchr()) >= 48)
+                    && (c <= 57)
+                    && (c != EOF)) {
+                    converted = (converted * 10) + 
+                        (c - 48);
+                } 
                 push(converted);
+                putchr();
+                break;
+            case 39:
+                ;
+                while ((c = getchr()) != 39) {
+                    push((char) c);
+                }
                 break;
             case 'p':
                 printf("%c", (char) pop()); 
@@ -147,26 +185,44 @@ int main(int argc, char *argv[]) {
                 stepBackward();
                 break;
             case '.':
-                //Write 
+                //Write
+                c = getchr();
+                if (c == '}') {
+                    int limit = pop();
+                    for (int i = 0; i < limit; i++) {
+                        write(pop());
+                        stepForward();
+                    }
+                    continue;   
+                }
+                if (c == '{') {
+                    int limit = pop();
+                    for(int i = 0; i < limit; i++) {
+                        write(pop());
+                        stepBackward();
+                    }
+                    continue;
+                }
+                putchr();
                 write(pop());
                 break;
             case ',':
                 //Read
-                if (program[program_head + 1] == '}') {
-                    program_head++;
+                ;
+                c = getchr();
+                if (c == '}') {
                     int limit = pop();
                     for (int i = 0; i < limit; i++) {
-                        stepForward();
                         push(read());
+                        stepForward();
                     }
                     continue;
                 }
-                if (program[program_head + 1] == '}') {
-                    program_head++;
+                if (c == '{') {
                     int limit = pop();
                     for (int i = 0; i < limit; i++) {
-                        stepBackward();
                         push(read());
+                        stepBackward();
                     }
                     continue;
                 }
@@ -174,40 +230,36 @@ int main(int argc, char *argv[]) {
                 break;
             case '?':
                 if (pop() == 1) {
-                    program_head++;
                     int converted = 0;
-                    while ((program[program_head] >= 48)
-                        && (program[program_head] <= 57)) {
-                        converted = (converted * 10) + (program[program_head] - 48);
-                        program_head++;
+                    while (((c = getchr()) >= 48)
+                        && (c <= 57)) {
+                        converted = (converted * 10) + (c - 48);
                     }
-                    program_head = converted;
-                    program_head--;
+                    jump(converted);
                     continue;
+                } else {
+                    while (((c = getchr()) >= 48)
+                        && c <= 57) {
+                    }
+                    putchr();       
                 }
-                program_head++;
-                while ((program[program_head] >= 48)
-                    && (program[program_head] <= 57)) {
-                    program_head++;
-                }
-                program_head--;
                 break; 
             case '{':
-                skipForward(pop());
+                skipBackward(pop());
                 break;
             case '}':
-                skipBackward(pop());
+                skipForward(pop());
                 break;
             case 'q':
             case '\0':
+            case EOF:
+                cleanup();
                 return 0;
             case '~':
                 //Discard
                 pop();
                 break;
             case ' ':
-                //Relative jump
-                program_head += pop();
                 break;
             case 'n':
                 //Negative
@@ -228,8 +280,18 @@ int main(int argc, char *argv[]) {
                 push(value);
                 push(value);
                 break;
-
-
+            case 'f':
+                //Flush
+                printf("\n");
+                break;
+            case '%':
+                //Swap top two stack elements
+                ;
+                int a_ = pop();
+                int b_ = pop();
+                push(a_);
+                push(b_);
+                break;
 
             //LOGIC OPERATIONS
             case '=':
@@ -239,8 +301,58 @@ int main(int argc, char *argv[]) {
                     push(0);
                 }
                 break;
-    }
-        program_head++;
+            case '>':
+                if (pop() > pop()) {
+                    push(1);
+                } else {
+                    push(0);
+                }
+                break;
+            case '<':
+                if (pop() < pop()) {
+                    push(1);
+                } else {
+                    push(0);
+                }
+                break;
+            case '|':
+                if ((pop() == 1) || (pop() == 1)) {
+                    push(1);
+                } else {
+                    push(0);
+                }
+                break;
+            case '&':
+                if ((pop() == 1) && (pop() == 1)) {
+                    push(1);
+                } else {
+                    push(0);
+                }
+                break;
+
+            //Math
+            case '*':
+                push(pop() * pop());
+                break;
+            case '/':
+                ;
+                a_ = pop();
+                b_ = pop();
+                if(b_ == 0) {
+                    printf("Division by 0\n");
+                    cleanup();
+                    return -1;
+                } else {
+                    push(a_ / b_);
+                }
+                break;
+            case '+':
+                push(pop() + pop());
+                break;
+            case '-':
+                push(pop() - pop());
+                break;
+        }
     } 
 }
 
